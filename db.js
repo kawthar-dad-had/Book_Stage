@@ -7,7 +7,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
   });
   
   // define the model for the table
-  const EpubDB = sequelize.define('epubs', {
+  const EpubDB = sequelize.define('epubsTest', {
     titleEpub: {
       type: Sequelize.STRING,
       allowNull: true
@@ -87,7 +87,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
   });
   
   // create the table in the database
-  sequelize.sync().then(() => {
+  sequelize.sync({force: true}).then(() => {
     console.log('Table created successfully');
   });
 
