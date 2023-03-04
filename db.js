@@ -1,13 +1,13 @@
 const Sequelize = require('sequelize');
 
 // initialize the database connection
-const sequelize = new Sequelize('dream_epub', 'root', '', {
+const sequelize = new Sequelize('epub_dream', 'root', 'root', {
     host: 'localhost',
     dialect: 'mysql'
   });
   
   // define the model for the table
-  const EpubDB = sequelize.define('epubsTest', {
+  const EpubDB = sequelize.define('Testkaw', {
     titleEpub: {
       type: Sequelize.STRING,
       allowNull: true
@@ -21,7 +21,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
       allowNull: true
     },
     subjectEpub: {
-      type: Sequelize.STRING,
+      type: Sequelize.TEXT("long"),
       allowNull: true
     },
     titlePropre: {
@@ -53,7 +53,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
       allowNull: true
     },
     subjectOpenLibrary: {
-      type: Sequelize.STRING,
+      type: Sequelize.TEXT("long"),
       allowNull: true
     },
     birthDateCatalog: {
@@ -77,7 +77,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
       allowNull: true
     },
     descriptionEpub: {
-      type: Sequelize.STRING,
+      type: Sequelize.TEXT("long"),
       allowNull: true
     },
     path: {
@@ -87,7 +87,7 @@ const sequelize = new Sequelize('dream_epub', 'root', '', {
   });
   
   // create the table in the database
-  sequelize.sync({force: true}).then(() => {
+  sequelize.sync().then(() => {
     console.log('Table created successfully');
   });
 

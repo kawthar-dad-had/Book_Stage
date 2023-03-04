@@ -3,6 +3,7 @@ var EPub = require('epub');
 var {convert} = require('html-to-text');
 var path = require('path');
 var htmlParser = require('node-html-parser');
+const { async } = require('node-stream-zip');
 
   /**
    * EpubToText#extract()
@@ -18,7 +19,13 @@ var htmlParser = require('node-html-parser');
 
   function extract(sourceFile, callback, initialCallback){
     try {
-      var epub = new EPub(sourceFile);
+      var epub = new EPub(sourceFile, {
+        unzip: {
+          windowBits: 15 // increase windowBits to 15
+        }
+      }).catch((error) => {
+        console.error('Error loading EPUB file:', error);
+      });
 
       // callback fired for each chapter (or they are written to disk)
       epub.on('end', function() {
@@ -79,7 +86,7 @@ var htmlParser = require('node-html-parser');
    * Callback parameters are (err)
    **/
   
-   function  extractTo  (sourceFile, destFolder , mdata, callback)   {
+   async function   extractTo  (sourceFile, destFolder , mdata, callback)   {
     try {
       var totalCount;
       var processedCount = 0;

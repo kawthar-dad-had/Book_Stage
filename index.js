@@ -1,21 +1,24 @@
 const EPub = require("epub2").EPub;
 const axios = require("axios");
 const {extractTo} = require("./EPUBToText");
-const models = require("./models");
 const SPARQL = require("sparql-client-2");
-const EpubDB = require('./db')
-const epubfile = "./epubs/(1933) Hommage à Zola - Louis-Ferdinand Céline.epub"
 const imagewebroot = "./images"
 const chapterwebroot = "./links" 
 const textFolder = "./textFolder" 
 const convertXml = require('xml-js');
 const { convert } = require('html-to-text');
+const epubfile = "./epubs/(1933) Hommage à Zola - Louis-Ferdinand Céline.epub"
+const EpubDB = require('./db')
+const { XMLParser} = require("fast-xml-parser");
+const parser = new XMLParser();
+const models = require("./models");
 const {addEpub} = models
 const path = require('path');
 const fs = require('fs');
 const xl = require('excel4node');
 const wb = new xl.Workbook();
 const ws = wb.addWorksheet('Worksheet Name'); 
+var epubCheck = require("epubcheck");
 
 function levenshtein(str1, str2) {
   let dp = [];
@@ -33,7 +36,7 @@ function levenshtein(str1, str2) {
         dp[i][j] = 1 + Math.min(dp[i][j - 1], dp[i - 1][j], dp[i - 1][j - 1]);
       }
     }
-  }
+  } 
 
   return dp[str1.length][str2.length];
 }
@@ -45,67 +48,163 @@ function matchPercentage(str1, str2) {
   return ((maxLength - levenshteinDistance) / maxLength * 100).toFixed(2);
 }
 
+function parseXml(xml) {
+  return new Promise((resolve, reject) => {
+      convertXml.xml2json(xml, {
+          compact: true,
+          space: 4
+          }, (err, result) => {
+          if (err) {
+            resolve({});
+          } else {
+            resolve(result);
+          }
+      });
+  });
+}
+
+function EpubPromise(file, imagewebroot, chapterwebroot) {
+  return new Promise((resolve, reject) => {
+      EPub.createAsync(file, imagewebroot, chapterwebroot, {
+        unzip: {
+          windowBits: 15 // increase windowBits to 15
+        }
+      }, (err, result) => {
+          if (err) {
+            resolve({});
+          } else {
+            resolve(result);
+          }
+      });
+  });
+}
+
 
 
 //Extraire
 const epubFunction = () => {
 
   try {
-    const directoryPath = path.join(__dirname, 'epub7');
+    const directoryPath = path.join(__dirname, '00 - TOUT EPUB');
     fs.readdir(directoryPath,async (err, files) => {
       try {
               //handling error
       if (err) {
         return console.log('Unable to scan directory: ' + err);
-    }
+     }
 
+     
     for (var i = 0; i < files.length; i++) {
       try {
-        let dataepub = await EPub.createAsync("epub7/"+files[i], imagewebroot, chapterwebroot);
-        if(dataepub.metadata.title && dataepub.metadata.creator ){
-          const titlePropre = dataepub.metadata.title.replace(/-|_/g, ' ').replace(/\[[^\]]*\]|\([^\)]*\)/g, "").replace(/\b\w*\d+\w*\b/g, "").replace(/[^a-zA-Z\sàâäéèêëïîôöùûüÿç'`]+/g, "")
-          console.log(i)
-          const infos = await getInfo(titlePropre, dataepub.metadata.creator, "")
-          const options = {
-            wordwrap: 130,
-            // ...
-          };
-          const text = convert(dataepub.metadata.description, options)
-          let age = ''
-          if((Number(infos.first_publish_yearOpenLibrary) < Number(infos.deathDateCatalog) || infos.deathDateCatalog == "...." ) && infos.first_publish_yearOpenLibrary != '' && infos.birthDateCatalog != ''){
-            age = (Number(infos.first_publish_yearOpenLibrary) - Number(infos.birthDateCatalog)).toString()
-          }else if (Number(infos.first_publish_yearOpenLibrary) > Number(infos.deathDateCatalog)) {
-            age = "Posthume"
-          }else if(infos.first_publish_yearOpenLibrary == '' || infos.birthDateCatalog == '' || infos.deathDateCatalog == null) {
-            age = "incomplet"
-          }
-          const md = {
-            titleEpub: dataepub.metadata.title,
-            creatorEpub: dataepub.metadata.creator,
-            publisherEpub: dataepub.metadata.publisher,
-            subjectEpub: `${dataepub.metadata.subject}`,
-            descriptionEpub: text,
-            titlePropre
-          }
-          let path = ''
-          const mdata = {...md, ...infos, age , path}
-          //Transformer epub to txt
-          var textFolderName = extractTo("epub7/"+files[i],textFolder , mdata , (err) => {
-            console.log(err);
-          })
-          if (textFolderName) {
-            mdata.path = textFolderName
-            //inserer dans la bdd
-            EpubDB.create(mdata).then((res) => {
-              //console.log(res);
-            }).catch((err) => {
-              console.log(err);
-            }) 
-          }
-
-          
+        console.log(i)
+        console.log(files[i])
+        let dataepub = await EPub.createAsync("00 - TOUT EPUB/"+files[i], imagewebroot, chapterwebroot,  {
+        unzip: {
+          windowBits: 15 // increase windowBits to 15
         }
-  
+      })
+
+      if (dataepub.metadata.title && dataepub.metadata.creator) {
+        const titlePropre = dataepub.metadata.title.replace(/-|_/g, ' ').replace(/\[[^\]]*\]|\([^\)]*\)/g, "").replace(/\b\w*\d+\w*\b/g, "").replace(/[^a-zA-Z\sàâäéèêëïîôöùûüÿç'`]+/g, "");
+        const infos = await getInfo(titlePropre, dataepub.metadata.creator, "");
+        const options = {
+          wordwrap: 130,
+          // ...
+        };
+        const text = convert(dataepub.metadata.description, options);
+        let age = '';
+        if ((Number(infos.first_publish_yearOpenLibrary) <= Number(infos.deathDateCatalog) || infos.deathDateCatalog == "....") && infos.first_publish_yearOpenLibrary != '' && infos.birthDateCatalog != '') {
+          age = (Number(infos.first_publish_yearOpenLibrary) - Number(infos.birthDateCatalog)).toString();
+        } else if (Number(infos.first_publish_yearOpenLibrary) > Number(infos.deathDateCatalog)) {
+          age = "Posthume";
+        } else if (infos.first_publish_yearOpenLibrary == '' || infos.birthDateCatalog == '' || infos.deathDateCatalog == null) {
+          age = "incomplet";
+        }
+        const md = {
+          titleEpub: dataepub.metadata.title,
+          creatorEpub: dataepub.metadata.creator,
+          publisherEpub: dataepub.metadata.publisher,
+          subjectEpub: `${dataepub.metadata.subject}`,
+          descriptionEpub: text,
+          titlePropre
+        };
+        let path = '';
+        const mdata = { ...md, ...infos, age, path };
+        //Transformer epub to txt
+        var textFolderName = extractTo("00 - TOUT EPUB/" + files[i], textFolder, mdata, (err) => {
+          console.log(err);
+        });
+        if (textFolderName) {
+          mdata.path = textFolderName;
+          //inserer dans la bdd
+          await EpubDB.create(mdata).then((res) => {
+            fs.unlinkSync("00 - TOUT EPUB/" + files[i]);
+          }).catch((err) => {
+            console.log(err);
+          });
+        }
+
+
+      }
+      /*
+      let dataepub = new EPub("00 - TOUT EPUB/"+files[i], imagewebroot, chapterwebroot,  {
+        unzip: {
+          windowBits: 15 // increase windowBits to 15
+        }
+      })
+      dataepub.on('end', async () => {
+          // validation was successful
+          console.log('EPUB validation successful');
+          if (dataepub.metadata.title && dataepub.metadata.creator) {
+            const titlePropre = dataepub.metadata.title.replace(/-|_/g, ' ').replace(/\[[^\]]*\]|\([^\)]*\)/g, "").replace(/\b\w*\d+\w*\b/g, "").replace(/[^a-zA-Z\sàâäéèêëïîôöùûüÿç'`]+/g, "");
+            const infos = await getInfo(titlePropre, dataepub.metadata.creator, "");
+            const options = {
+              wordwrap: 130,
+              // ...
+            };
+            const text = convert(dataepub.metadata.description, options);
+            let age = '';
+            if ((Number(infos.first_publish_yearOpenLibrary) < Number(infos.deathDateCatalog) || infos.deathDateCatalog == "....") && infos.first_publish_yearOpenLibrary != '' && infos.birthDateCatalog != '') {
+              age = (Number(infos.first_publish_yearOpenLibrary) - Number(infos.birthDateCatalog)).toString();
+            } else if (Number(infos.first_publish_yearOpenLibrary) > Number(infos.deathDateCatalog)) {
+              age = "Posthume";
+            } else if (infos.first_publish_yearOpenLibrary == '' || infos.birthDateCatalog == '' || infos.deathDateCatalog == null) {
+              age = "incomplet";
+            }
+            const md = {
+              titleEpub: dataepub.metadata.title,
+              creatorEpub: dataepub.metadata.creator,
+              publisherEpub: dataepub.metadata.publisher,
+              subjectEpub: `${dataepub.metadata.subject}`,
+              descriptionEpub: text,
+              titlePropre
+            };
+            let path = '';
+            const mdata = { ...md, ...infos, age, path };
+            //Transformer epub to txt
+            var textFolderName = extractTo("00 - TOUT EPUB/" + files[i], textFolder, mdata, (err) => {
+              console.log(err);
+            });
+            if (textFolderName) {
+              mdata.path = textFolderName;
+              //inserer dans la bdd
+              await EpubDB.create(mdata).then((res) => {
+                //console.log(res);
+              }).catch((err) => {
+                console.log(err);
+              });
+            }
+
+
+          }
+        });
+
+      dataepub.parse()
+*/
+                    
+
+      
+
       } catch (error) {
         console.log("for")
       }
@@ -227,7 +326,7 @@ const getInfoCatalogueAny = async (title, author) => {
 }
 const getInfoCatalogueAnyCreator = async (title, author) => {
   try {
-    return await axios.get(`https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve&query=(bib.author%20any%20%22${author}%22)%20and%20(bib.title%20adj%20%22${title}%22)`)
+    return await axios.get(`https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve&query=(bib.author%20any%20%22${author}%22)%20and%20(bib.title%20any%20%22${title}%22)`)
   } catch (error) {
     console.log("getInfoCatalogueAnyCreator")
   }
@@ -305,73 +404,110 @@ const verification = async (title, author, nomFichier) => {
     let authorLastNameCatalog = ''
     let authorFirsNameCatalog = ''
     let found = false
-  
-    let xmlData = convertXml.xml2json(bk.data, {
-      compact: true,
-      space: 4
-    });
-    let obj = JSON.parse(xmlData)
-  
-    console.log("adj")
-/*
-    if (obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] == 0) {
-      console.log("AnyCreator")
-      const bk = await getInfoCatalogueAnyCreator(title, author)
+    let obj = {}
+
+    if (bk.data) {
       let xmlData = convertXml.xml2json(bk.data, {
         compact: true,
         space: 4
-      });
+      })
+     //let xmlData = await parseXml(bk.data)
       obj = JSON.parse(xmlData)
-      if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
-        if(!Array.isArray(obj['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
-          records.push(obj['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
-        }else {
-          records = obj['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
-        }
-        let i = 0
-        while(i < records.length || !found) {
-          let k = 0
-          while(k < records[i]['mxc:record']['mxc:datafield'].length && !found) {
-            if(records[i]['mxc:record']['mxc:datafield'][k]['_attributes']['tag'] == "700"){
-              let l = 0
-              while(l < records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'].length) {
-                if(obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "a" && author.includes(obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'])) {//nom
-                  authorLastNameCatalog = obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text']
-                } else if(obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "b" && author.includes(obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'])) {//prenom
-                  authorFirsNameCatalog = obj.records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text']
-                }
-                l++
-              }
-            }
-            if (authorLastNameCatalog == '' || authorFirsNameCatalog == '') {
-              authorLastNameCatalog = ''
-              authorFirsNameCatalog = ''
-            }else {
-              found = true
-            }
-            k++
+    }
+
+  
+    console.log("adj")
+
+    if (obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] == 0) {
+      try {
+        console.log("AnyCreator")
+        const bk = await getInfoCatalogueAnyCreator(title, author)
+        
+        let xmlData = convertXml.xml2json(bk.data, {
+          compact: true,
+          space: 4
+        }, (err, result) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(result);
           }
-          i++
-        }
-      } 
+        });
+        //let xmlData = await parseXml(bk.data)
+        let obj1 = JSON.parse(xmlData)
+        if(obj1['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
+          if(!Array.isArray(obj1['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
+            records.push(obj1['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
+          }else {
+            records = obj1['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
+          }
+          let i = 0
+          while(i < records.length && !found) {
+            let k = 0
+            while(k < records[i]['mxc:record']['mxc:datafield'].length && !found) {
+              if(records[i]['mxc:record']['mxc:datafield'][k]['_attributes']['tag'] == "700"){
+                let l = 0
+                while(l < records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'].length) {
+                  if(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "a" && author.includes(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'])) {//nom
+                    authorLastNameCatalog = records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text']
+                  } else if(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "b" && author.includes(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'])) {//prenom
+                    authorFirsNameCatalog = records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text']
+                  }
+                  l++
+                }
+              }
+              if (authorLastNameCatalog == '' || authorFirsNameCatalog == '') {
+                authorLastNameCatalog = ''
+                authorFirsNameCatalog = ''
+              }else {
+                found = true
+              }
+              k++
+            }
+            i++
+          }
+        } 
+      } catch (error) {
+        console.log("error verification")
+      }
     }
 
     if(found) {
-      const bk = await getInfoCatalogue(titleCatalogue, author)
-      let xmlData = convertXml.xml2json(bk.data, {
-        compact: true,
-        space: 4
-      });
-      obj = JSON.parse(xmlData)
+      try {
+        const bk = await getInfoCatalogue(title, authorFirsNameCatalog + ' ' + authorLastNameCatalog)
+        
+        if (bk.data) {
+          let xmlData = convertXml.xml2json(bk.data, {
+            compact: true,
+            space: 4
+          })
+          
+          //let xmlData = await parseXml(bk.data)
+          obj = JSON.parse(xmlData)
+        }
+      } catch (error) {
+        console.log("found error")
+      }
+
     }
-*/
+    
+
     if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] == 0) {
-      const bk = await getInfoCatalogue(nomFichier, author)
-      let xmlData = convertXml.xml2json(bk.data, {
-        compact: true,
-        space: 4
-      });
-      obj = JSON.parse(xmlData)
+      try {
+        const bk = await getInfoCatalogue(nomFichier, author)
+        
+        if (bk.data) {
+          let xmlData = convertXml.xml2json(bk.data, {
+            compact: true,
+            space: 4
+          });
+          
+          //let xmlData = await parseXml(bk.data)
+          obj = JSON.parse(xmlData)
+        }
+      } catch (error) {
+        console.log(error)
+      }
     }
   
     if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
@@ -384,38 +520,52 @@ const verification = async (title, author, nomFichier) => {
     }
   
     if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] == 0) {
-      console.log("Any")
-      const bk = await getInfoCatalogueAny(title, author)
-      let xmlData = convertXml.xml2json(bk.data, {
-        compact: true,
-        space: 4
-      });
-      obj = JSON.parse(xmlData)
-      typeAny = true
-      if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
-        if(!Array.isArray(obj['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
-          records.push(obj['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
+      try {
+        let bk
+        console.log("Any")
+        if (found) {
+          bk = await getInfoCatalogueAny(title, authorFirsNameCatalog + ' ' + authorLastNameCatalog)
         }else {
-          records = obj['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
+          bk = await getInfoCatalogueAny(title, author)
         }
-        let i = 0
-        while(i < records.length) {
-          let k = 0
-          while(k < records[i]['mxc:record']['mxc:datafield'].length) {
-            if(records[i]['mxc:record']['mxc:datafield'][k]['_attributes']['tag'] == "200"){
-              let l = 0
-              while(l < records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'].length) {
-                if(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "a") {
-                  percentages.push({title: records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'], percentage: matchPercentage(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'].toLowerCase(), title.toLowerCase())})
-                }
-                l++
-              }
-            }
-            k++
+        
+        if(bk.data) {
+          let xmlData = convertXml.xml2json(bk.data, {
+            compact: true,
+            space: 4
+          });
+          
+          //let xmlData = await parseXml(bk.data)
+          obj = JSON.parse(xmlData)
+        }
+        typeAny = true
+        if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
+          if(!Array.isArray(obj['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
+            records.push(obj['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
+          }else {
+            records = obj['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
           }
-          i++
-        }
-      } 
+          let i = 0
+          while(i < records.length) {
+            let k = 0
+            while(k < records[i]['mxc:record']['mxc:datafield'].length) {
+              if(records[i]['mxc:record']['mxc:datafield'][k]['_attributes']['tag'] == "200"){
+                let l = 0
+                while(l < records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'].length) {
+                  if(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_attributes']['code'] == "a") {
+                    percentages.push({title: records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'], percentage: matchPercentage(records[i]['mxc:record']['mxc:datafield'][k]['mxc:subfield'][l]['_text'].toLowerCase(), title.toLowerCase())})
+                  }
+                  l++
+                }
+              }
+              k++
+            }
+            i++
+          }
+        } 
+      } catch (error) {
+        console.log("error verification 2")
+      }
     }
 
 
@@ -424,21 +574,30 @@ const verification = async (title, author, nomFichier) => {
       const maxPercentage = percentages.reduce((max, curr) => (Number(curr.percentage) > Number(max.percentage) ? curr : max));
       titleCatalogue = maxPercentage.title
       if(maxPercentage.percentage > 70){
-        console.log(title , titleCatalogue , maxPercentage.percentage)
-        const bk = await getInfoCatalogue(titleCatalogue, author)
-        typeAny = false
-        let xmlData = convertXml.xml2json(bk.data, {
-          compact: true,
-          space: 4
-        });
-        obj = JSON.parse(xmlData)
-        if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
-          if(!Array.isArray(obj['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
-            records.push(obj['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
-          }else {
-            records = obj['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
-          }
+        try {
+          console.log(title , titleCatalogue , maxPercentage.percentage)
+          const bk = await getInfoCatalogue(titleCatalogue, author)
+          typeAny = false
+          if (bk.data) {
+                      
+          let xmlData = convertXml.xml2json(bk.data, {
+            compact: true,
+            space: 4
+          });
           
+          //let xmlData = await parseXml(bk.data)
+          obj = JSON.parse(xmlData)
+          }
+          if(obj['srw:searchRetrieveResponse']['srw:numberOfRecords']['_text'] > 0) {
+            if(!Array.isArray(obj['srw:searchRetrieveResponse']['srw:records']['srw:record'])){
+              records.push(obj['srw:searchRetrieveResponse']['srw:records']['srw:record']['srw:recordData'])
+            }else {
+              records = obj['srw:searchRetrieveResponse']['srw:records']['srw:record'].map(record => record['srw:recordData']);
+            }
+            
+          }
+        } catch (error) {
+          console.log("error percentage")
         }
       }
   
@@ -581,7 +740,13 @@ const getInfo = async (title, author, nomFichier) => {
   }
   
   const genderDataBnf = await getGender(authorFirsNameCatalog+" "+authorLastNameCatalog)
-  return {traducteurCatalog, authorFirsNameCatalog, authorLastNameCatalog, birthDateCatalog: authorDatesCatalog.split("-")[0], deathDateCatalog: authorDatesCatalog.split("-")[1], typeCatalog, langueCatalog, titleCatalogue: obj.titleCatalogue, first_publish_yearOpenLibrary: openLibrary.first_publish_yearOpenLibrary, subjectOpenLibrary: openLibrary.subjectOpenLibrary, genderDataBnf}
+  if (!author.includes(authorFirsNameCatalog) && !author.includes(authorLastNameCatalog)) {
+    return {}
+
+  }else {
+    return {traducteurCatalog, authorFirsNameCatalog, authorLastNameCatalog, birthDateCatalog: authorDatesCatalog.split("-")[0], deathDateCatalog: authorDatesCatalog.split("-")[1], typeCatalog, langueCatalog, titleCatalogue: obj.titleCatalogue, first_publish_yearOpenLibrary: openLibrary.first_publish_yearOpenLibrary, subjectOpenLibrary: openLibrary.subjectOpenLibrary, genderDataBnf}
+
+  }
   } catch (error) {
     console.log("getInfo")
   }
